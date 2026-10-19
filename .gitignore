@@ -1,0 +1,25 @@
+target/
+*.war
+*.jar
+*.class
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# OS specific
+.DS_Store
+Thumbs.db
