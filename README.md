@@ -8,31 +8,31 @@ A full-stack, enterprise-grade Java Web Application built with **Jakarta EE 10 /
 
 ```mermaid
 flowchart TD
-    subgraph Developer & CI/CD
-        DEV[Developer Git Push] --> REPO[GitHub / Git SCM]
-        REPO --> JENKINS[Jenkins Pipeline Server]
-        JENKINS -->|1. mvn test & package| WAR[travel-app.war Artifact]
+    subgraph cicd ["Developer and CI/CD"]
+        DEV["Developer Git Push"] --> REPO["GitHub / Git SCM"]
+        REPO --> JENKINS["Jenkins Pipeline Server"]
+        JENKINS -->|"1. mvn test & package"| WAR["travel-app.war Artifact"]
     end
 
-    subgraph AWS Cloud (VPC)
-        subgraph EC2 Instance 1: Web Tier
-            TOMCAT[Tomcat 10 Application Server\nt2.micro / Port 8080]
-            SERVLET[CustomerRegistrationServlet / CustomerListServlet]
-            JSP[index.jsp / confirmation.jsp / customers.jsp]
-            DAO[CustomerDao / DBConnection]
+    subgraph aws_cloud ["AWS Cloud (VPC)"]
+        subgraph ec2_web ["EC2 Instance 1: Web Tier"]
+            TOMCAT["Apache Tomcat 10<br/>Port 8080"]
+            SERVLET["CustomerRegistrationServlet / CustomerListServlet"]
+            JSP["JSP Presentation Layer<br/>index.jsp / confirmation.jsp / customers.jsp"]
+            DAO["CustomerDao / DBConnection"]
         end
 
-        subgraph EC2 Instance 2: Database Tier
-            MYSQL[(MySQL 8.x Server\nt2.micro / Port 3306)]
-            TABLE[(customer_data Table)]
+        subgraph ec2_db ["EC2 Instance 2: Database Tier"]
+            MYSQL[("MySQL 8.x Server<br/>Port 3306")]
+            TABLE[("customer_data Table")]
         end
     end
 
-    WAR -->|2. SCP / SSH Deploy| TOMCAT
-    USER[Traveler / Client Browser] -->|HTTP GET/POST Port 8080| TOMCAT
+    WAR -->|"2. SCP / SSH Deploy"| TOMCAT
+    USER["Traveler / Client Browser"] -->|"HTTP GET/POST Port 8080"| TOMCAT
     TOMCAT --> SERVLET
     SERVLET --> DAO
-    DAO -->|JDBC Port 3306| MYSQL
+    DAO -->|"JDBC Port 3306"| MYSQL
     MYSQL --- TABLE
 ```
 
