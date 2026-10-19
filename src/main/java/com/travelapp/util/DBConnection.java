@@ -96,8 +96,12 @@ public class DBConnection {
         String host = getParam("DB_HOST", "db.host", "localhost");
         String port = getParam("DB_PORT", "db.port", "3306");
         String dbName = getParam("DB_NAME", "db.name", "travel_db");
-        String user = getParam("DB_USER", "db.user", "root");
-        String password = getParam("DB_PASSWORD", "db.password", "root");
+        String user = getParam("DB_USER", "db.user", "traveluser");
+        String password = getParam("DB_PASSWORD", "db.password", "");
+
+        if ("root".equalsIgnoreCase(user)) {
+            LOGGER.warning("SECURITY WARNING: Running as 'root' database user. Configure a dedicated 'traveluser' account for security.");
+        }
         String useSSL = getParam("DB_USE_SSL", "db.useSSL", "false");
         String allowPublicKey = getParam("DB_ALLOW_PUB_KEY", "db.allowPublicKeyRetrieval", "true");
         String timezone = getParam("DB_SERVER_TIMEZONE", "db.serverTimezone", "UTC");

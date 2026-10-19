@@ -28,7 +28,7 @@ flowchart TD
         end
     end
 
-    WAR -->|"2. SCP / SSH Deploy"| TOMCAT
+    WAR -->|"2. Secure SCP Deploy"| TOMCAT
     USER["Traveler / Client Browser"] -->|"HTTP GET/POST Port 8080"| TOMCAT
     TOMCAT --> SERVLET
     SERVLET --> DAO
@@ -37,13 +37,13 @@ flowchart TD
 ```
 
 ### Key Technical Specs
-- **Application Name**: Travel App (`travel-app.war`)
+- **Application Name & Context**: Travel App (`travel-app.war` deployed strictly to `/travel-app/`)
 - **Web Technologies**: Jakarta EE 10, Servlet 6.0 (`jakarta.servlet.*`), JSP 3.1, JSTL 3.0
 - **Design Pattern**: MVC (Model: `CustomerBean`, View: JSP/CSS, Controller: Servlets, Data Access: DAO)
 - **Target Table**: `customer_data` in database `travel_db`
-- **Application Server**: Apache Tomcat 10.1+
-- **Database**: MySQL 8.x (on dedicated AWS EC2 instance, with SQLite zero-config fallback for testing)
-- **CI/CD**: Jenkins Declarative Pipeline (`Jenkinsfile`)
+- **Application Server**: Apache Tomcat 10.1+ (Latest patched release: 10.1.34 or Ubuntu LTS package)
+- **Database**: MySQL 8.x (on dedicated AWS EC2 instance, with dedicated non-root application user)
+- **CI/CD**: Jenkins Declarative Pipeline (`Jenkinsfile`) with dedicated build agent & host key verification
 
 ---
 
@@ -51,11 +51,11 @@ flowchart TD
 
 ```text
 tomcat-java-app/
-├── pom.xml                               # Maven project configuration (Jakarta EE 10, MySQL, SQLite)
+├── pom.xml                               # Maven config (Jakarta EE 10, Failsafe IT, MySQL, SQLite)
 ├── Jenkinsfile                           # Jenkins Declarative CI/CD Pipeline script
 ├── README.md                             # Comprehensive documentation & deployment guide
 ├── sql/
-│   └── schema.sql                        # Database initialization & customer_data schema
+│   └── schema.sql                        # Database initialization, traveluser grants & schema
 └── src/
     ├── main/
     │   ├── java/
@@ -67,12 +67,12 @@ tomcat-java-app/
     │   │           │   ├── CustomerDao.java        # DAO interface
     │   │           │   └── CustomerDaoImpl.java    # DAO implementation with PreparedStatement
     │   │           ├── servlet/
-    │   │           │   ├── CustomerRegistrationServlet.java  # Handles form submission & validation
+    │   │           │   ├── CustomerRegistrationServlet.java  # Handles form validation & save
     │   │           │   └── CustomerListServlet.java          # Queries & lists customer_data
     │   │           └── util/
     │   │               └── DBConnection.java       # Connection provider with auto-init & env overrides
     │   ├── resources/
-    │   │   └── db.properties             # DB configuration (host, credentials, mode)
+    │   │   └── db.properties             # Safe DB config (defaults to dedicated traveluser)
     │   └── webapp/
     │       ├── WEB-INF/
     │       │   └── web.xml               # Jakarta EE 10 deployment descriptor
@@ -89,7 +89,8 @@ tomcat-java-app/
             └── com/
                 └── travelapp/
                     ├── CustomerBeanTest.java       # Unit tests for bean and BMI categorization
-                    └── CustomerDaoTest.java        # Integration test using isolated SQLite DB
+                    ├── CustomerDaoTest.java        # Unit test with isolated SQLite DB
+                    └── CustomerDaoMySQLIT.java     # Integration test for live MySQL validation
 ```
 
 ---
@@ -109,17 +110,27 @@ The registration form (`index.jsp`) captures and saves the following attributes 
 
 ---
 
-## 🗄️ Database Setup (`customer_data`)
+## 🔒 Database Setup & Security (`customer_data`)
 
-The database script is located at [`sql/schema.sql`](file:///d:/tomcat-java-app/sql/schema.sql):
+The database script is located at [`sql/schema.sql`](file:///d:/tomcat-java-app/sql/schema.sql).
+
+> [!IMPORTANT]
+> **Safe Database Policy**: The application never runs as `root`. A dedicated application user (`traveluser`) is provisioned with least-privilege permissions restricted only to `travel_db`.
 
 ```sql
+-- 1. Create Database
 CREATE DATABASE IF NOT EXISTS travel_db
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
 USE travel_db;
 
+-- 2. Create Dedicated Application User (Least Privilege)
+CREATE USER IF NOT EXISTS 'traveluser'@'%' IDENTIFIED BY 'TravelPass123!';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, INDEX ON travel_db.* TO 'traveluser'@'%';
+FLUSH PRIVILEGES;
+
+-- 3. Create customer_data Table
 CREATE TABLE IF NOT EXISTS customer_data (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -144,7 +155,7 @@ Create two security groups in the AWS VPC Management Console:
 #### A. Security Group for MySQL (`sg-travel-mysql`)
 - **Inbound Rules**:
   - **Type**: MySQL/Aurora (Port `3306`)
-    - **Source**: Select `Custom` -> Enter the Security Group ID of the Tomcat EC2 instance (`sg-travel-tomcat`) or Tomcat's Private IP (e.g. `172.31.x.x/32`). *Do not expose 3306 to 0.0.0.0/0*.
+    - **Source**: Select `Custom` $\to$ Enter the Security Group ID of the Tomcat EC2 instance (`sg-travel-tomcat`) or Tomcat's Private IP (e.g. `172.31.x.x/32`). *Do not expose 3306 to 0.0.0.0/0*.
   - **Type**: SSH (Port `22`)
     - **Source**: Your Admin IP (`My IP`).
 
@@ -197,23 +208,22 @@ Create two security groups in the AWS VPC Management Console:
    sudo systemctl restart mysql
    ```
 
-5. **Create Database, Table, and Remote User**:
+5. **Initialize Database and Dedicated User**:
    Open MySQL root shell:
    ```bash
    sudo mysql
    ```
-   Run the following commands:
+   Execute the schema:
    ```sql
-   CREATE DATABASE travel_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-   -- Create user accessible from the Tomcat EC2 instance
-   CREATE USER 'traveluser'@'%' IDENTIFIED BY 'TravelPass123!';
-   GRANT ALL PRIVILEGES ON travel_db.* TO 'traveluser'@'%';
-   FLUSH PRIVILEGES;
-
+   CREATE DATABASE IF NOT EXISTS travel_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
    USE travel_db;
 
-   CREATE TABLE customer_data (
+   -- Dedicated application account (Do NOT use root!)
+   CREATE USER IF NOT EXISTS 'traveluser'@'%' IDENTIFIED BY 'TravelPass123!';
+   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, INDEX ON travel_db.* TO 'traveluser'@'%';
+   FLUSH PRIVILEGES;
+
+   CREATE TABLE IF NOT EXISTS customer_data (
        id INT AUTO_INCREMENT PRIMARY KEY,
        name VARCHAR(100) NOT NULL,
        age INT NOT NULL,
@@ -234,7 +244,7 @@ Create two security groups in the AWS VPC Management Console:
 
 1. **Launch Instance**:
    - **Name**: `TravelApp-Tomcat-Server`
-   - **Instance Type**: `t2.micro` (Free Tier eligible)
+   - **Instance Type**: `t2.micro`
    - **AMI**: Ubuntu 22.04 LTS
    - **Security Group**: Assign `sg-travel-tomcat`
    - **Key Pair**: Select your `.pem` key pair.
@@ -251,24 +261,31 @@ Create two security groups in the AWS VPC Management Console:
    java -version
    ```
 
-4. **Install Apache Tomcat 10**:
+4. **Install Apache Tomcat 10 (Choose Option A or Option B)**:
+
+   #### Option A: Current Patched Release 10.1.34 (Recommended for standalone `/opt/tomcat10`)
    ```bash
-   # Create tomcat user and directory
    sudo useradd -m -U -d /opt/tomcat10 -s /bin/false tomcat
-
-   # Download Tomcat 10.1
    cd /tmp
-   wget https://archive.apache.org/dist/tomcat/tomcat-10/v10.1.20/bin/apache-tomcat-10.1.20.tar.gz
+   # Download current patched 10.1.x release
+   wget https://dlcdn.apache.org/tomcat/tomcat-10/v10.1.34/bin/apache-tomcat-10.1.34.tar.gz || \
+   wget https://archive.apache.org/dist/tomcat/tomcat-10/v10.1.34/bin/apache-tomcat-10.1.34.tar.gz
 
-   # Extract to /opt/tomcat10
    sudo mkdir -p /opt/tomcat10
-   sudo tar -xf apache-tomcat-10.1.20.tar.gz -C /opt/tomcat10 --strip-components=1
+   sudo tar -xf apache-tomcat-10.1.34.tar.gz -C /opt/tomcat10 --strip-components=1
    sudo chown -R tomcat:tomcat /opt/tomcat10
    sudo chmod -R u+x /opt/tomcat10/bin
    ```
+   *Webapps path*: `/opt/tomcat10/webapps`
+
+   #### Option B: Ubuntu APT Package (Auto-updated via OS security patches)
+   ```bash
+   sudo apt install tomcat10 tomcat10-admin -y
+   ```
+   *Webapps path*: `/var/lib/tomcat10/webapps`
 
 5. **Configure Database Environment Variables in Tomcat**:
-   Create or edit `/opt/tomcat10/bin/setenv.sh`:
+   For Option A, create `/opt/tomcat10/bin/setenv.sh`:
    ```bash
    sudo nano /opt/tomcat10/bin/setenv.sh
    ```
@@ -287,11 +304,13 @@ Create two security groups in the AWS VPC Management Console:
    sudo chmod +x /opt/tomcat10/bin/setenv.sh
    ```
 
-6. **Create a Systemd Service for Tomcat 10**:
+   *(For Option B, add the same exports into `/etc/default/tomcat10`).*
+
+6. **Create / Enable Systemd Service**:
+   For Option A:
    ```bash
    sudo nano /etc/systemd/system/tomcat10.service
    ```
-   Paste the following:
    ```ini
    [Unit]
    Description=Apache Tomcat 10 Web Application Container
@@ -299,106 +318,91 @@ Create two security groups in the AWS VPC Management Console:
 
    [Service]
    Type=forking
-
    User=tomcat
    Group=tomcat
-
    Environment="JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64"
    Environment="CATALINA_PID=/opt/tomcat10/temp/tomcat.pid"
    Environment="CATALINA_HOME=/opt/tomcat10"
    Environment="CATALINA_BASE=/opt/tomcat10"
-
    ExecStart=/opt/tomcat10/bin/startup.sh
    ExecStop=/opt/tomcat10/bin/shutdown.sh
-
    RestartSec=10
    Restart=always
 
    [Install]
    WantedBy=multi-user.target
    ```
-   Start and enable the service:
    ```bash
    sudo systemctl daemon-reload
    sudo systemctl enable tomcat10
    sudo systemctl start tomcat10
-   sudo systemctl status tomcat10
    ```
 
 ---
 
 ## 🚀 Jenkins CI/CD Pipeline Setup
 
-The [`Jenkinsfile`](file:///d:/tomcat-java-app/Jenkinsfile) in this repository provides automated continuous delivery.
+The [`Jenkinsfile`](file:///d:/tomcat-java-app/Jenkinsfile) in this repository implements best-practice CI/CD principles:
 
-### 1. Prerequisites on Jenkins Server
-- **Jenkins Plugins**:
-  - `SSH Agent Plugin`
-  - `Pipeline`
-  - `Git Plugin`
-  - `JUnit Plugin`
-- **Global Tool Configuration**:
-  - JDK: `JDK-17`
-  - Maven: `Maven-3.9`
+### Pipeline Safeguards Implemented
+1. **Consistent Deployment Context**: Deploys strictly as `${APP_NAME}.war` (`travel-app.war`) into the Tomcat webapps directory. The application is always accessible at `/travel-app/`.
+2. **Strict Smoke Test**: Uses `curl --fail` with retry parameters. Any HTTP 4xx/5xx or server unavailability fails the build immediately (no swallowed errors).
+3. **Dedicated Agent Selection**: Targets a dedicated build agent label (`linux-maven-agent`) rather than unrestricted `agent any`.
+4. **Path Alignment**: Configurable `TOMCAT_WEBAPPS_DIR` parameter supporting both `/opt/tomcat10/webapps` (manual tarball) and `/var/lib/tomcat10/webapps` (Ubuntu apt package).
+5. **Secure SSH Verification**: Automatically scans and registers the EC2 host key into `~/.ssh/known_hosts` using `ssh-keyscan` instead of disabling host key checks.
+6. **Dual Test Verification**: Runs unit tests (`CustomerBeanTest`, `CustomerDaoTest`) during build, plus integration tests (`CustomerDaoMySQLIT`) during the Maven verify phase.
 
-### 2. Configure Jenkins Credentials
-1. Navigate to **Manage Jenkins** -> **Credentials** -> **System** -> **Global credentials (unrestricted)**.
-2. Click **Add Credentials**:
+### Configuring Jenkins Credentials
+1. **Navigate**: **Manage Jenkins** $\to$ **Credentials** $\to$ **System** $\to$ **Global credentials**.
+2. **Add SSH Key**:
    - **Kind**: `SSH Username with private key`
    - **ID**: `aws-ec2-ssh-key`
    - **Username**: `ubuntu`
-   - **Private Key**: Paste the contents of your AWS `.pem` private key file.
-3. Click **Add Credentials** (Secret Text):
+   - **Private Key**: Paste the contents of your AWS EC2 `.pem` private key file.
+3. **Add Tomcat Host**:
    - **Kind**: `Secret text`
    - **ID**: `TOMCAT_EC2_HOST`
    - **Secret**: Enter the Public IP or DNS of the Tomcat EC2 instance (e.g. `54.210.xx.xx`).
 
-### 3. Create the Pipeline Job
-1. In Jenkins dashboard, click **New Item** -> enter `Travel-App-Pipeline` -> select **Pipeline**.
-2. Scroll to the **Pipeline** section:
+### Create and Run the Pipeline Job
+1. Click **New Item** $\to$ `Travel-App-Pipeline` $\to$ **Pipeline**.
+2. Under **Pipeline**:
    - **Definition**: `Pipeline script from SCM`
    - **SCM**: `Git`
-   - **Repository URL**: `https://github.com/your-username/travel-app.git`
+   - **Repository URL**: `https://github.com/krishnaTvc/tomcat-java-app.git`
    - **Branch**: `*/main`
    - **Script Path**: `Jenkinsfile`
-3. Click **Save** and trigger **Build Now**.
+3. Click **Save** and trigger **Build with Parameters**.
 
 ---
 
-## 💻 Local Build & Verification
+## 🧪 Comprehensive Testing Guide
 
-### 1. Build the WAR with Maven
+### 1. Local Unit Tests (Offline / Zero-Config)
+```bash
+mvn clean test
+```
+- Executes `CustomerBeanTest` and `CustomerDaoTest` using an isolated local SQLite database. No external MySQL connection is required.
+
+### 2. Live MySQL Integration Tests
+```bash
+mvn verify -Ddb.type=mysql -Ddb.host=<MYSQL_EC2_PRIVATE_OR_PUBLIC_IP> -Ddb.user=traveluser -Ddb.password=TravelPass123!
+```
+- Executes `CustomerDaoMySQLIT` against your live MySQL instance.
+- Automatically validates network reachability, verifies schema initialization, inserts a test customer into `customer_data`, and confirms record retrieval.
+
+### 3. Packaging the Application
 ```bash
 mvn clean package
 ```
-- This compiles all Java classes, executes JUnit 5 tests, and outputs:
-  - `target/travel-app.war`
-
-### 2. Local Testing (Zero-Config SQLite Mode)
-If you do not have MySQL running locally, simply test with SQLite:
-- In `src/main/resources/db.properties`, set:
-  ```properties
-  db.type=sqlite
-  sqlite.filepath=travel_app.db
-  ```
-The app will auto-create the `customer_data` table locally upon first request.
-
-### 3. Deploying to Local Tomcat 10
-Copy the WAR file into your Tomcat `webapps` folder:
-```bash
-cp target/travel-app.war /path/to/tomcat10/webapps/ROOT.war
-# or keep the context path:
-cp target/travel-app.war /path/to/tomcat10/webapps/travel-app.war
-```
-Access the application:
-- Registration Form: `http://localhost:8080/travel-app/` or `http://localhost:8080/`
-- View Database Records: `http://localhost:8080/travel-app/customers`
+- Outputs production artifact: [`target/travel-app.war`](file:///d:/tomcat-java-app/target/travel-app.war)
 
 ---
 
-## 🧪 Testing the Live Application
+## 🌐 Live Application Verification
 
-1. Open your browser and navigate to:
+Once deployed to your Tomcat EC2 instance:
+1. Open your browser:
    ```text
    http://<TOMCAT_EC2_PUBLIC_IP>:8080/travel-app/
    ```
@@ -406,8 +410,8 @@ Access the application:
    - **Full Name**: e.g., `Sophia Martinez`
    - **Age**: `28`
    - **Gender**: `Female`
-   - **BMI**: Enter `21.45` or enter Height `168` cm and Weight `60` kg using the auto-calculator.
-   - **Desired Country to Travel**: e.g. `Switzerland` (or click one of the destination chips).
+   - **BMI**: Enter `21.45` or use the interactive Height (`168` cm) & Weight (`60` kg) calculator.
+   - **Desired Country to Travel**: e.g. `Switzerland` (or click a destination chip).
 3. Click **Submit & Save to Database**.
-4. You will be directed to the **Registration Confirmed** page with a boarding receipt and assigned Database ID `#1`.
-5. Click **View All in Database** to review the live table `customer_data`.
+4. View the boarding receipt with assigned Database ID on the confirmation screen.
+5. Click **View All in Database** (`/travel-app/customers`) to view all live records in the `customer_data` table.

@@ -11,7 +11,12 @@ CREATE DATABASE IF NOT EXISTS travel_db
 
 USE travel_db;
 
--- 2. Create customer_data Table
+-- 2. Dedicated Application User Setup (Principle of Least Privilege)
+CREATE USER IF NOT EXISTS 'traveluser'@'%' IDENTIFIED BY 'TravelPass123!';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, INDEX ON travel_db.* TO 'traveluser'@'%';
+FLUSH PRIVILEGES;
+
+-- 3. Create customer_data Table
 CREATE TABLE IF NOT EXISTS customer_data (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
